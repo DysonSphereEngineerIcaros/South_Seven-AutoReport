@@ -1,4 +1,4 @@
-# encoding=utf8
+# encoding=utf8 
 import requests
 import json
 import time
@@ -17,13 +17,15 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 CAS_RETURN_URL = "https://weixine.ustc.edu.cn/2020/caslogin"
 class Report(object):
-    def __init__(self, stuid, password, data_path, emer_person, relation, emer_phone):
+    def __init__(self, stuid, password, data_path, emer_person, relation, emer_phone, dorm_building, dorm):
         self.stuid = stuid
         self.password = password
         self.data_path = data_path
         self.emer_person = emer_person
         self.relation = relation
         self.emer_phone = emer_phone
+        self.dorm_building = dorm_building
+        self.dorm = dorm
 
     def report(self):
         loginsuccess = False
@@ -41,42 +43,6 @@ class Report(object):
         if not loginsuccess:
             return False
 
-        # 自动出校报备
-        ret = session.get("https://weixine.ustc.edu.cn/2020/apply/daliy", allow_redirects=False)
-        print(ret.status_code)
-        print(ret.url)
-        if (ret.status_code == 200):
-        	#没有报备过
-        	print("没有报备过, 开始报备.")
-        	data = ret.text
-        	data = data.encode('ascii','ignore').decode('utf-8','ignore')
-        	soup = BeautifulSoup(data, 'html.parser')
-        	token2 = soup.find("input", {"name": "_token"})['value']
-        	start_date = soup.find("input", {"id": "start_date"})['value']
-        	end_date = soup.find("input", {"id": "end_date"})['value']
-        	
-        	#print("{}---{}".format(start_date, end_date))
-
-        	REPORT_URL = "https://weixine.ustc.edu.cn/2020/apply/daliy/post"
-        	REPORT_DATA = {
-        		'_token': token2,
-        		'start_date': start_date,
-        		'end_date': end_date
-        	}
-
-        	ret = session.post(url=REPORT_URL, data=REPORT_DATA)
-       		print(ret.status_code)
-       		#print(ret.text)
-
-        elif(ret.status_code == 302):
-        	print("你这周已经报备过了.")
-        	#已经报备过
-        else:
-        	print("error! code "+ret.status_code)
-        	#出错
-
-
-
         data = getform.text
         data = data.encode('ascii','ignore').decode('utf-8','ignore')
         soup = BeautifulSoup(data, 'html.parser')
@@ -88,8 +54,10 @@ class Report(object):
             data["jinji_lxr"]=self.emer_person
             data["jinji_guanxi"]=self.relation
             data["jiji_mobile"]=self.emer_phone
+            data["dorm_building"]=self.dorm_building
+            data["dorm"]=self.dorm
             data["_token"]=token
-        print(data)
+        #print(data)
 
 
         headers = {
@@ -101,7 +69,6 @@ class Report(object):
             'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
             'referer': 'https://weixine.ustc.edu.cn/2020/home',
             'accept-language': 'zh-CN,zh;q=0.9',
-            'Connection': 'close',
             'cookie': "PHPSESSID=" + cookies.get("PHPSESSID") + ";XSRF-TOKEN=" + cookies.get("XSRF-TOKEN") + ";laravel_session="+cookies.get("laravel_session"),
         }
 
@@ -114,6 +81,7 @@ class Report(object):
         token = soup.find(
             "span", {"style": "position: relative; top: 5px; color: #666;"})
         flag = False
+        print(token.text)
         if pattern.search(token.text) is not None:
             date = pattern.search(token.text).group()
             print("Latest report: " + date)
@@ -136,9 +104,50 @@ class Report(object):
                 print("{} second(s) before.".format(delta_nega.seconds))
         if flag == False:
             print("Report FAILED!")
+            print("健康打卡失败, 取消例行报备!")
+            return flag
         else:
             print("Report SUCCESSFUL!")
-        return flag
+        
+        # 自动出校报备
+        ret = session.get("https://weixine.ustc.edu.cn/2020/apply/daliy/i")
+        #print(ret.status_code)
+        #print(ret.url)
+        if (ret.status_code == 200):
+            #每日报备
+            print("开始例行报备.")
+            data = ret.text
+            data = data.encode('ascii','ignore').decode('utf-8','ignore')
+            soup = BeautifulSoup(data, 'html.parser')
+            token2 = soup.find("input", {"name": "_token"})['value']
+            start_date = soup.find("input", {"id": "start_date"})['value']
+            end_date = soup.find("input", {"id": "end_date"})['value']
+            
+            print("{}---{}".format(start_date, end_date))
+
+            REPORT_URL = "https://weixine.ustc.edu.cn/2020/apply/daliy/post"
+            RETURN_COLLEGE = {'东校区', '西校区', '中校区', '南校区', '北校区'}
+            REPORT_DATA = {
+                '_token': token2,
+                'start_date': start_date,
+                'end_date': end_date,
+                'return_college[]': RETURN_COLLEGE,
+                't': 3,
+            }
+
+            ret = session.post(url=REPORT_URL, data=REPORT_DATA)
+            print(ret.status_code)
+            #print(ret.text)
+
+        elif(ret.status_code == 302):
+            print("你这周已经报备过了.")
+            #老页面的判定, 新页面已经不需要
+        else:
+            print("error! code "+ret.status_code)
+            #出错
+            return False
+        return True
+
 
     def login(self):
         retries = Retry(total=5,
@@ -179,7 +188,7 @@ class Report(object):
         }
         s.post(url, data=data)
 
-        print("login...")
+        print("lt-code is {}, login...".format(lt_code))
         return s
 
 
@@ -191,8 +200,10 @@ if __name__ == "__main__":
     parser.add_argument('emer_person', help='emergency person', type=str)
     parser.add_argument('relation', help='relationship between you and he/she', type=str)
     parser.add_argument('emer_phone', help='phone number', type=str)
+    parser.add_argument('dorm_building', help='dorm building num', type=str)
+    parser.add_argument('dorm', help='dorm number', type=str)
     args = parser.parse_args()
-    autorepoter = Report(stuid=args.stuid, password=args.password, data_path=args.data_path, emer_person=args.emer_person, relation=args.relation, emer_phone=args.emer_phone)
+    autorepoter = Report(stuid=args.stuid, password=args.password, data_path=args.data_path, emer_person=args.emer_person, relation=args.relation, emer_phone=args.emer_phone, dorm_building=args.dorm_building, dorm=args.dorm)
     count = 5
     while count != 0:
         ret = autorepoter.report()
